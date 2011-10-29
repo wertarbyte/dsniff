@@ -140,6 +140,11 @@ decode_tds(u_char *buf, int len, u_char *obuf, int olen)
 	
 	obuf[0] = '\0';
 
+    if (th->size != 8) {
+           /* wrong header length */
+           return (strlen(obuf));
+    }
+
 	for (th = (struct tds_hdr *)buf;
 	     len > sizeof(*th) && len >= ntohs(th->size);
 	     buf += ntohs(th->size), len -= ntohs(th->size)) {
