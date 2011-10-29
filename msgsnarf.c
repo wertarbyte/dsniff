@@ -584,6 +584,7 @@ sniff_msgs(struct tcp_stream *ts, void **conn_save)
 		if (i == 0) {
 			if ((c = malloc(sizeof(*c))) == NULL)
 				nids_params.no_mem("sniff_msgs");
+			memset(c, 0, sizeof(*c));
 			c->ip = ts->addr.saddr;
 			c->nick = strdup("unknown");
 			SLIST_INSERT_HEAD(&client_list, c, next);
