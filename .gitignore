@@ -1,0 +1,29 @@
+*.o
+*.a
+# after ./configure
+Makefile
+config.cache
+config.h
+config.log
+config.status
+# generated files
+nfs_prot.c
+mount.c
+mount.h
+nfs_prot.h
+# the resulting programs
+arpspoof
+nsspoof
+dsniff
+dnsspoof
+filesnarf
+macof
+mailsnarf
+msgsnarf
+sshmitm
+sshow
+tcpkill
+tcpnice
+urlsnarf
+webmitm
+webspy
