@@ -52,6 +52,9 @@ pcap_dloff(pcap_t *pd)
 	case DLT_NULL:
 		offset = 4;
 		break;
+	case DLT_LINUX_SLL:   /* e.g. ppp */
+		offset = 16;
+		break;
 	default:
 		warnx("unsupported datalink type");
 		break;
