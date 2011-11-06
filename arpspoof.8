@@ -9,7 +9,7 @@ intercept packets on a switched LAN
 .na
 .nf
 .fi
-\fBarpspoof\fR [\fB-i \fIinterface\fR] [\fB-t \fItarget\fR] \fIhost\fR
+\fBarpspoof\fR [\fB-i \fIinterface\fR] [\fB-t \fItarget\fR] [\fB-r\fR] \fIhost\fR
 .SH DESCRIPTION
 .ad
 .fi
@@ -26,6 +26,9 @@ Specify the interface to use.
 .IP "\fB-t \fItarget\fR"
 Specify a particular host to ARP poison (if not specified, all hosts
 on the LAN).
+.IP "\fB-r\fR"
+Poison both hosts (host and target) to capture traffic in both directions.
+(only valid in conjuntion with -t)
 .IP \fIhost\fR
 Specify the host you wish to intercept packets for (usually the local
 gateway).
