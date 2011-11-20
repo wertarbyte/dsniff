@@ -9,7 +9,7 @@ intercept packets on a switched LAN
 .na
 .nf
 .fi
-\fBarpspoof\fR [\fB-i \fIinterface\fR] [\fB-c \fIown|host|both\fR] [\fB-t \fItarget\fR] [\fB-r\fR] \fIhost\fR
+\fBarpspoof\fR [\fB-i \fIinterface\fR] [\fB-c \fIown|host|both\fR] [\fB-s \fInetwork/prefixlength\fR] [\fB-t \fItarget\fR] [\fB-r\fR] \fIhost\fR
 .SH DESCRIPTION
 .ad
 .fi
@@ -33,6 +33,9 @@ cleans up afterwards.
 .IP "\fB-t \fItarget\fR"
 Specify a particular host to ARP poison (if not specified, all hosts
 on the LAN). Repeat to specify multiple hosts.
+.IP "\fB-s \fInetwork/prefixlength\fR"
+Specify a network in CIDR notation to poison. An arpscan is performed to
+locate active hosts in the network.
 .IP "\fB-r\fR"
 Poison both hosts (host and target) to capture traffic in both directions.
 (only valid in conjuntion with -t)

