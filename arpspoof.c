@@ -40,6 +40,9 @@ static struct host *targets;
 static char *intf;
 static int poison_reverse;
 
+static uint8_t *my_ha = NULL;
+static uint8_t *brd_ha = "\xff\xff\xff\xff\xff\xff";
+
 static void
 usage(void)
 {
@@ -49,21 +52,11 @@ usage(void)
 }
 
 static int
-arp_send(libnet_t *l, int op, u_int8_t *sha,
-	 in_addr_t spa, u_int8_t *tha, in_addr_t tpa)
+arp_send(libnet_t *l, int op,
+	u_int8_t *sha, in_addr_t spa,
+	u_int8_t *tha, in_addr_t tpa)
 {
 	int retval;
-
-	if (sha == NULL &&
-	    (sha = (u_int8_t *)libnet_get_hwaddr(l)) == NULL) {
-		return (-1);
-	}
-	if (spa == 0) {
-		if ((spa = libnet_get_ipaddr4(l)) == -1)
-			return (-1);
-	}
-	if (tha == NULL)
-		tha = "\xff\xff\xff\xff\xff\xff";
 	
 	libnet_autobuild_arp(op, sha, (u_int8_t *)&spa,
 			     tha, (u_int8_t *)&tpa, l);
@@ -165,7 +158,7 @@ cleanup(int sig)
 			if (fw) {
 				arp_send(l, ARPOP_REPLY,
 					 (u_int8_t *)&spoof.mac, spoof.ip,
-					 (target->ip ? (u_int8_t *)&target->mac : NULL),
+					 (target->ip ? (u_int8_t *)&target->mac : brd_ha),
 					 target->ip);
 				/* we have to wait a moment before sending the next packet */
 				sleep(1);
@@ -253,6 +246,10 @@ main(int argc, char *argv[])
 		}
 	}
 
+	if ((my_ha = (u_int8_t *)libnet_get_hwaddr(l)) == NULL) {
+		errx(1, "Unable to determine own mac address");
+	}
+
 	signal(SIGHUP, cleanup);
 	signal(SIGINT, cleanup);
 	signal(SIGTERM, cleanup);
@@ -260,11 +257,11 @@ main(int argc, char *argv[])
 	for (;;) {
 		struct host *target = targets;
 		while(target->ip) {
-			arp_send(l, ARPOP_REPLY, NULL, spoof.ip,
-				(target->ip ? (u_int8_t *)&target->mac : NULL),
+			arp_send(l, ARPOP_REPLY, my_ha, spoof.ip,
+				(target->ip ? (u_int8_t *)&target->mac : brd_ha),
 				target->ip);
 			if (poison_reverse) {
-				arp_send(l, ARPOP_REPLY, NULL, target->ip, (uint8_t *)&spoof.mac, spoof.ip);
+				arp_send(l, ARPOP_REPLY, my_ha, target->ip, (uint8_t *)&spoof.mac, spoof.ip);
 			}
 			target++;
 		}
