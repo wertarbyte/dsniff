@@ -43,11 +43,14 @@ static int poison_reverse;
 static uint8_t *my_ha = NULL;
 static uint8_t *brd_ha = "\xff\xff\xff\xff\xff\xff";
 
+static int cleanup_src_own = 1;
+static int cleanup_src_host = 0;
+
 static void
 usage(void)
 {
 	fprintf(stderr, "Version: " VERSION "\n"
-		"Usage: arpspoof [-i interface] [-t target] [-r] host\n");
+		"Usage: arpspoof [-i interface] [-c own|host|both] [-t target] [-r] host\n");
 	exit(1);
 }
 
@@ -152,18 +155,23 @@ cleanup(int sig)
 	int fw = arp_find(spoof.ip, &spoof.mac);
 	int bw = poison_reverse && targets[0].ip && arp_find_all();
 	int i;
+	int rounds = (cleanup_src_own*5 + cleanup_src_host*5);
 
 	fprintf(stderr, "Cleaning up and re-arping targets...\n");
-	for (i = 0; i < 10; i++) {
+	for (i = 0; i < rounds; i++) {
 		struct host *target = targets;
 		while(target->ip) {
+			uint8_t *src_ha = NULL;
+			if (cleanup_src_own && (i%2 || !cleanup_src_host)) {
+				src_ha = my_ha;
+			}
 			/* XXX - on BSD, requires ETHERSPOOF kernel. */
 			if (fw) {
 				arp_send(l, ARPOP_REPLY,
 					 (u_int8_t *)&spoof.mac, spoof.ip,
 					 (target->ip ? (u_int8_t *)&target->mac : brd_ha),
 					 target->ip,
-					 (i%2 ? my_ha : NULL));
+					 src_ha);
 				/* we have to wait a moment before sending the next packet */
 				sleep(1);
 			}
@@ -172,7 +180,7 @@ cleanup(int sig)
 					 (u_int8_t *)&target->mac, target->ip,
 					 (u_int8_t *)&spoof.mac,
 					 spoof.ip,
-					 (i%2 ? my_ha : NULL));
+					 src_ha);
 				sleep(1);
 			}
 			target++;
@@ -191,6 +199,7 @@ main(int argc, char *argv[])
 	char libnet_ebuf[LIBNET_ERRBUF_SIZE];
 	int c;
 	int n_targets;
+	char *cleanup_src = NULL;
 
 	spoof.ip = 0;
 	intf = NULL;
@@ -200,7 +209,7 @@ main(int argc, char *argv[])
 	/* allocate enough memory for target list */
 	targets = calloc( argc+1, sizeof(struct host) );
 
-	while ((c = getopt(argc, argv, "ri:t:h?V")) != -1) {
+	while ((c = getopt(argc, argv, "ri:t:c:h?V")) != -1) {
 		switch (c) {
 		case 'i':
 			intf = optarg;
@@ -211,6 +220,9 @@ main(int argc, char *argv[])
 			break;
 		case 'r':
 			poison_reverse = 1;
+			break;
+		case 'c':
+			cleanup_src = optarg;
 			break;
 		default:
 			usage();
@@ -224,6 +236,28 @@ main(int argc, char *argv[])
 
 	if (poison_reverse && !n_targets) {
 		errx(1, "Spoofing the reverse path (-r) is only available when specifying a target (-t).");
+		usage();
+	}
+
+	if (!cleanup_src || strcmp(cleanup_src, "host")==0) { /* default! */
+		/* only use the target hw address when cleaning up;
+		 * this can screw up some bridges and scramble access
+		 * for our own host.
+		 */
+		cleanup_src_own = 0;
+		cleanup_src_host = 1;
+	} else if (strcmp(cleanup_src, "own")==0) {
+		/* only use our own hw address when cleaning up,
+		 * not jeopardizing any bridges on the way to our
+		 * target
+		 */
+		cleanup_src_own = 1;
+		cleanup_src_host = 0;
+	} else if (strcmp(cleanup_src, "both")==0) {
+		cleanup_src_own = 1;
+		cleanup_src_host = 1;
+	} else {
+		errx(1, "Invalid parameter to -c: use 'own', 'host' or 'both'.");
 		usage();
 	}
 
