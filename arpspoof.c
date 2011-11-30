@@ -239,25 +239,26 @@ main(int argc, char *argv[])
 		usage();
 	}
 
-	if (!cleanup_src || strcmp(cleanup_src, "host")==0) { /* default! */
-		/* only use the target hw address when cleaning up;
-		 * this can screw up some bridges and scramble access
-		 * for our own host.
-		 */
-		cleanup_src_own = 0;
-		cleanup_src_host = 1;
-	} else if (strcmp(cleanup_src, "own")==0) {
+	if (!cleanup_src || strcmp(cleanup_src, "own")==0) { /* default! */
 		/* only use our own hw address when cleaning up,
 		 * not jeopardizing any bridges on the way to our
 		 * target
 		 */
 		cleanup_src_own = 1;
 		cleanup_src_host = 0;
+	} else if (strcmp(cleanup_src, "host")==0) {
+		/* only use the target hw address when cleaning up;
+		 * this can screw up some bridges and scramble access
+		 * for our own host, however it resets the arp table
+		 * more reliably
+		 */
+		cleanup_src_own = 0;
+		cleanup_src_host = 1;
 	} else if (strcmp(cleanup_src, "both")==0) {
 		cleanup_src_own = 1;
 		cleanup_src_host = 1;
 	} else {
-		errx(1, "Invalid parameter to -c: use 'own', 'host' or 'both'.");
+		errx(1, "Invalid parameter to -c: use 'own' (default), 'host' or 'both'.");
 		usage();
 	}
 

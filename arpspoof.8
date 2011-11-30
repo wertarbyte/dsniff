@@ -26,7 +26,10 @@ Specify the interface to use.
 .IP "\fB-c \fIown|host|both\fR"
 Specify which hardware address t use when restoring the arp configuration;
 while cleaning up, packets can be send with the own address as well as with
-the address of the host.
+the address of the host. Sending packets with a fake hw address can disrupt
+connectivity with certain switch/ap/bridge configurations, however it works
+more reliably than using the own address, which is the default way arpspoof
+cleans up afterwards.
 .IP "\fB-t \fItarget\fR"
 Specify a particular host to ARP poison (if not specified, all hosts
 on the LAN). Repeat to specify multiple hosts.
