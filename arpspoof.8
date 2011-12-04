@@ -9,7 +9,7 @@ intercept packets on a switched LAN
 .na
 .nf
 .fi
-\fBarpspoof\fR [\fB-i \fIinterface\fR] [\fB-c \fIown|host|both\fR] [\fB-s \fInetwork/prefixlength\fR] [\fB-t \fItarget\fR] [\fB-r\fR] \fIhost\fR
+\fBarpspoof\fR [-v] [\fB-i \fIinterface\fR] [\fB-c \fIown|host|both\fR] [\fB-s \fInetwork/prefixlength\fR] [\fB-t \fItarget\fR] [\fB-r\fR] \fIhost\fR
 .SH DESCRIPTION
 .ad
 .fi
@@ -21,6 +21,8 @@ switch.
 Kernel IP forwarding (or a userland program which accomplishes the
 same, e.g. fragrouter(8)) must be turned on ahead of time.
 .SH OPTIONS
+.IP "\fB-v\fR"
+Make arpspoof verbose about what it is doing.
 .IP "\fB-i \fIinterface\fR"
 Specify the interface to use.
 .IP "\fB-c \fIown|host|both\fR"

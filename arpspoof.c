@@ -42,6 +42,7 @@ struct host {
 #define HOST_ACTIVE (1<<0)
 #define HOST_SUBNET (1<<1)
 
+static int verbose = 0;
 static libnet_t *l;
 static struct host spoof = {0};
 static int n_targets = 0;
@@ -60,7 +61,7 @@ static void
 usage(void)
 {
 	fprintf(stderr, "Version: " VERSION "\n"
-		"Usage: arpspoof [-i interface] [-c own|host|both] [-t target] [-s network/prefixlength] [-r] host\n");
+		"Usage: arpspoof [-v] [-i interface] [-c own|host|both] [-t target] [-s network/prefixlength] [-r] host\n");
 	exit(1);
 }
 
@@ -249,8 +250,11 @@ main(int argc, char *argv[])
 	/* allocate enough memory for target list */
 	targets = calloc( argc+1, sizeof(struct host) );
 
-	while ((c = getopt(argc, argv, "ri:s:t:c:h?V")) != -1) {
+	while ((c = getopt(argc, argv, "vri:s:t:c:h?V")) != -1) {
 		switch (c) {
+		case 'v':
+			verbose = 1;
+			break;
 		case 'i':
 			intf = optarg;
 			break;
@@ -331,9 +335,12 @@ main(int argc, char *argv[])
 	if ((l = libnet_init(LIBNET_LINK, intf, libnet_ebuf)) == NULL)
 		errx(1, "%s", libnet_ebuf);
 
-	printf("Scanning %d hw addresses...\n", n_targets);
+	fprintf(stderr, "Scanning %d hw addresses...\n", n_targets);
 	struct host *target = targets;
 	for (; target->ip; target++) {
+		if (verbose) {
+			fprintf(stderr, "Looking up host %s...\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE));
+		}
 		int arp_status = arp_find(target->ip, &target->mac);
 		if (arp_status &&
 				/* just make sure we are not getting an empty or broadcast address */
@@ -341,12 +348,12 @@ main(int argc, char *argv[])
 				(memcmp(&target->mac, brd_ha, sizeof(struct ether_addr)) != 0)) {
 			target->flags |= HOST_ACTIVE;
 			if (target->flags & HOST_SUBNET) {
-				printf("Found host in subnet %s: %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE), ether_ntoa((struct ether_addr *)&target->mac));
+				fprintf(stderr, "Found host in subnet %s: %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE), ether_ntoa((struct ether_addr *)&target->mac));
 			}
 		} else {
 			target->flags &= (~HOST_ACTIVE);
 			if (! (target->flags & HOST_SUBNET)) {
-				printf("Unable to find specified host %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE));
+				fprintf(stderr, "Unable to find specified host %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE));
 			}
 		}
 	}
