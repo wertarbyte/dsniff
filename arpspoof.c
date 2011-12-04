@@ -35,8 +35,12 @@ extern char *ether_ntoa(struct ether_addr *);
 struct host {
 	in_addr_t ip;
 	struct ether_addr mac;
-	uint8_t active;
+	uint8_t flags;
 };
+
+/* host flags */
+#define HOST_ACTIVE (1<<0)
+#define HOST_SUBNET (1<<1)
 
 static libnet_t *l;
 static struct host spoof = {0};
@@ -155,28 +159,28 @@ static int arp_find_all() {
 	return 0;
 }
 
-static int target_add(in_addr_t addr) {
+static int target_add(in_addr_t addr, uint8_t flags) {
 	targets[n_targets].ip = addr;
-	targets[n_targets].active = 0;
+	targets[n_targets].flags = flags;
 	targets[n_targets+1].ip = (uint32_t)0;
 	return n_targets++;
 }
 
-static int arp_scan(in_addr_t addr, int prefix_length) {
+static int subnet_add(in_addr_t addr, int prefix_length) {
 	uint32_t mask = ~((1<<(32-prefix_length))-1);
 	uint32_t net = (ntohl((uint32_t)addr)) & mask;
 	uint32_t brd = (ntohl((uint32_t)addr)) | ~mask;
 	uint32_t a;
 	for (a = net+1; a<brd; a++) {
 		in_addr_t ia = (in_addr_t) htonl(a);
-		target_add(ia);
+		target_add(ia, HOST_SUBNET);
 	}
 }
 
 static int active_targets(void) {
 	int n = 0;
 	struct host *target = targets;
-	for (; target->ip; target++) if (target->active) n++;
+	for (; target->ip; target++) if (target->flags & HOST_ACTIVE) n++;
 	return n;
 }
 
@@ -194,7 +198,7 @@ cleanup(int sig)
 		for(;target->ip;target++) {
 			uint8_t *src_ha = NULL;
 
-			if (!target->active) continue;
+			if (!(target->flags & HOST_ACTIVE)) continue;
 
 			if (cleanup_src_own && (i%2 || !cleanup_src_host)) {
 				src_ha = my_ha;
@@ -255,7 +259,7 @@ main(int argc, char *argv[])
 			if (target_addr == -1) {
 				usage();
 			} else {
-				target_add(target_addr);
+				target_add(target_addr, 0);
 			}
 			break;
 		case 'r':
@@ -275,7 +279,7 @@ main(int argc, char *argv[])
 			int mem = (argc+1 + n_scan_targets) * sizeof(struct host);
 			targets = realloc( targets, mem );
 			targets[n_targets].ip = (uint32_t)0;
-			arp_scan(inet_addr(optarg), scan_prefix_length);
+			subnet_add(inet_addr(optarg), scan_prefix_length);
 			break;
 		case 'c':
 			cleanup_src = optarg;
@@ -327,7 +331,7 @@ main(int argc, char *argv[])
 	if ((l = libnet_init(LIBNET_LINK, intf, libnet_ebuf)) == NULL)
 		errx(1, "%s", libnet_ebuf);
 
-	printf("Looking up %d hw addresses...\n", n_targets);
+	printf("Scanning %d hw addresses...\n", n_targets);
 	struct host *target = targets;
 	for (; target->ip; target++) {
 		int arp_status = arp_find(target->ip, &target->mac);
@@ -335,11 +339,15 @@ main(int argc, char *argv[])
 				/* just make sure we are not getting an empty or broadcast address */
 				(memcmp(&target->mac, zero_ha, sizeof(struct ether_addr)) != 0) &&
 				(memcmp(&target->mac, brd_ha, sizeof(struct ether_addr)) != 0)) {
-			target->active = 1;
-			printf("Found host %s: %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE), ether_ntoa((struct ether_addr *)&target->mac));
+			target->flags |= HOST_ACTIVE;
+			if (target->flags & HOST_SUBNET) {
+				printf("Found host in subnet %s: %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE), ether_ntoa((struct ether_addr *)&target->mac));
+			}
 		} else {
-			target->active = 0;
-			printf("Unable to find host %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE));
+			target->flags &= (~HOST_ACTIVE);
+			if (! (target->flags & HOST_SUBNET)) {
+				printf("Unable to find specified host %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE));
+			}
 		}
 	}
 
@@ -365,7 +373,7 @@ main(int argc, char *argv[])
 	for (;;) {
 		struct host *target = targets;
 		for(;target->ip; target++) {
-			if (!target->active) continue;
+			if (!(target->flags & HOST_ACTIVE)) continue;
 			/* do not target our spoof host! */
 			if (target->ip != spoof.ip) {
 				arp_send(l, ARPOP_REPLY, my_ha, spoof.ip,
