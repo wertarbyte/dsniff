@@ -50,6 +50,7 @@ static int n_hosts = 0;
 static struct host *hosts;
 static char *intf;
 static int poison_reverse;
+static int poison_mesh;
 
 static uint8_t *my_ha = NULL;
 static uint8_t *brd_ha = "\xff\xff\xff\xff\xff\xff";
@@ -62,7 +63,7 @@ static void
 usage(void)
 {
 	fprintf(stderr, "Version: " VERSION "\n"
-		"Usage: arpspoof [-v] [-i interface] [-c own|host|both] [-t target] [-s network/prefixlength] [-r] host\n");
+		"Usage: arpspoof [-v] [-i interface] [-c own|host|both] [-t target] [-s network/prefixlength] [-m] [-r] [hosts...]\n");
 	exit(1);
 }
 
@@ -203,6 +204,7 @@ cleanup(int sig)
 
 			struct host *model = hosts;
 			for(;model->ip;model++) {
+				if (!(model->flags & HOST_ACTIVE)) continue;
 				int fw = arp_find(target->ip, &target->mac);
 				int bw = poison_reverse;
 
@@ -252,12 +254,13 @@ main(int argc, char *argv[])
 
 	intf = NULL;
 	poison_reverse = 0;
+	poison_mesh = 0;
 	n_hosts = 0;
 
 	/* allocate enough memory for target list */
 	hosts = calloc( argc+1, sizeof(struct host) );
 
-	while ((c = getopt(argc, argv, "vri:s:t:c:h?V")) != -1) {
+	while ((c = getopt(argc, argv, "vrmi:s:t:c:h?V")) != -1) {
 		switch (c) {
 		case 'v':
 			verbose = 1;
@@ -275,6 +278,9 @@ main(int argc, char *argv[])
 			break;
 		case 'r':
 			poison_reverse = 1;
+			break;
+		case 'm':
+			poison_mesh = 1;
 			break;
 		case 's':
 			scan_prefix = strchr(optarg, '/');
@@ -332,6 +338,13 @@ main(int argc, char *argv[])
 		}
 		host_add(target_addr, HOST_MODEL);
 		argv++;
+	}
+
+	if (poison_mesh) {
+		struct host *host = hosts;
+		for(;host->ip; host++) {
+			host->flags |= (HOST_TARGET|HOST_MODEL);
+		}
 	}
 
 	if (poison_reverse && active_targets() <= 0) {
@@ -394,6 +407,7 @@ main(int argc, char *argv[])
 			if (!(target->flags & HOST_ACTIVE)) continue;
 			struct host *model = hosts;
 			for (;model->ip; model++) {
+				if (!(model->flags & HOST_ACTIVE)) continue;
 				if (!(model->flags & HOST_MODEL)) continue;
 				if (target->ip != model->ip) {
 					arp_send(l, ARPOP_REPLY, my_ha, model->ip,
