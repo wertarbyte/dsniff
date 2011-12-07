@@ -42,9 +42,22 @@ well as a model to imitate; this way, it is possible to intercept all communicat
 .IP \fItarget[/prefixlength]\fR
 Any additional arguments will be considered targets which will receive spoofed arp packets, poisoning
 their arp caches. Traffic from these hosts to the ones specified as models will be intercepted.
+.SH EXAMPLES
+.ad
+.fi
+.IP "# arpspoof -i eth0 -m 192.168.0.1 192.168.0.0/24"
+Send fake arp replies to every host in the network 192.168.0.0-255, posing as 192.168.0.1 (probably the gateway).
+.IP "# arpspoof -i eth0 -r -m 192.168.0.1 192.168.0.4 192.168.0.2"
+Send fake arp messages to the hosts 192.168.0.4 and 192.168.0.2 to intercept their communication
+with 192.168.0.1; since reverse poisoning is in effect, 192.168.0.1 is also fed fake arp replies
+to poison its arp cache and make bidirectional sniffing possible.
+.IP "# arpspoof -i eth0 192.168.0.0/24 -x"
+Take over the complete network by enabling cross poisoning: Every host will receive arp replies concerning
+every other system.
 .SH "SEE ALSO"
 dsniff(8), fragrouter(8)
-.SH AUTHOR
+.SH AUTHORS
 .na
 .nf
 Dug Song <dugsong@monkey.org>
+Stefan Tomanek <stefan@pico.ruhr.de>
