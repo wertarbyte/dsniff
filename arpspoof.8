@@ -9,7 +9,7 @@ intercept packets on a switched LAN
 .na
 .nf
 .fi
-\fBarpspoof\fR [-v] [\fB-i \fIinterface\fR] [\fB-c \fIown|host|both\fR] [\fB-s \fInetwork/prefixlength\fR] [\fB-t \fItarget\fR] [\fB-m\fR] [\fB-r\fR] [\fIhosts...\fR]
+\fBarpspoof\fR [-v] [\fB-i \fIinterface\fR] [\fB-c \fIown|host|both\fR] [\fB-m \fImodel[/prefixlength]\fR] [\fB-x\fR] [\fB-r\fR] [\fItarget[/prefixlength]\fR]
 .SH DESCRIPTION
 .ad
 .fi
@@ -26,27 +26,22 @@ Make arpspoof verbose about what it is doing.
 .IP "\fB-i \fIinterface\fR"
 Specify the interface to use.
 .IP "\fB-c \fIown|host|both\fR"
-Specify which hardware address t use when restoring the arp configuration;
+Specify which hardware address to use when restoring the arp configuration;
 while cleaning up, packets can be send with the own address as well as with
 the address of the host. Sending packets with a fake hw address can disrupt
 connectivity with certain switch/ap/bridge configurations, however it works
 more reliably than using the own address, which is the default way arpspoof
 cleans up afterwards.
-.IP "\fB-t \fItarget\fR"
-Specify a particular host to ARP poison (if not specified, all hosts
-on the LAN). Repeat to specify multiple hosts.
-.IP "\fB-s \fInetwork/prefixlength\fR"
-Specify a network in CIDR notation to poison. An arpscan is performed to
-locate active hosts in the network.
+.IP "\fB-m \fImodel[/prefixlength]\fR"
+Specify which host(s) to imitate.
 .IP "\fB-r\fR"
-Poison both hosts (host and target) to capture traffic in both directions.
-(only valid in conjuntion with -t)
-.IP "\fB-m\fR"
-Consider each host a potential target as well as a model to imitate; Poison the entire
-mesh, i.e. every possible connection between all hosts.
-.IP \fIhost\fR
-Specify the host(s) you wish to intercept packets for (usually the local
-gateway).
+Poison both hosts (model and target) in classic mitm style to capture traffic in both directions.
+.IP "\fB-x\fR"
+Enable cross-poisoning: consider each host a potential target for receiving fake arp packets as
+well as a model to imitate; this way, it is possible to intercept all communication between hosts.
+.IP \fItarget[/prefixlength]\fR
+Any additional arguments will be considered targets which will receive spoofed arp packets, poisoning
+their arp caches. Traffic from these hosts to the ones specified as models will be intercepted.
 .SH "SEE ALSO"
 dsniff(8), fragrouter(8)
 .SH AUTHOR
