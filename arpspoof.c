@@ -43,6 +43,7 @@ struct host {
 #define HOST_SUBNET (1<<1) /* host originates from a subnet scan */
 #define HOST_TARGET (1<<2) /* we try to poison the arp cache of this host */
 #define HOST_MODEL  (1<<3) /* we are trying to imitate this host and intercept traffic towards it*/
+#define HOST_AVOID  (1<<4) /* avoid sending packets to this host */
 
 static int verbose = 0;
 static libnet_t *l;
@@ -63,7 +64,7 @@ static void
 usage(void)
 {
 	fprintf(stderr, "Version: " VERSION "\n"
-		"Usage: arpspoof [-v] [-i interface] [-c own|host|both] [-m model[/prefixlength]] [-x] [-r] [target[/prefixlength]]\n");
+		"Usage: arpspoof [-v] [-i interface] [-c own|host|both] [-m model[/prefixlength]] [-a avoid[/prefixlength]] [-x] [-r] [target[/prefixlength]]\n");
 	exit(1);
 }
 
@@ -162,11 +163,29 @@ static int arp_find_all() {
 	return 0;
 }
 
+static struct host *find_host(in_addr_t ipaddr, uint8_t flags) {
+	struct host *h = hosts;
+	for (; h->ip; h++) {
+		if (h->ip == ipaddr && ((h->flags & flags) == flags) ) return h;
+	}
+	return NULL;
+}
+
 static int host_add(in_addr_t addr, uint8_t flags) {
+	struct host *h = NULL;
+	if (h = find_host(addr, 0)) {
+		/* host is already present in our list, just add flags */
+		h->flags |= flags;
+		return n_hosts;
+	}
+	/* host is not in the list, add it */
+	hosts = realloc( hosts, (n_hosts+2)*sizeof(struct host) );
 	hosts[n_hosts].ip = addr;
 	hosts[n_hosts].flags = flags;
-	hosts[n_hosts+1].ip = (uint32_t)0;
-	return n_hosts++;
+	/* zero terminate the final entry */
+	n_hosts++;
+	memset(&hosts[n_hosts], 0, sizeof(struct host));
+	return n_hosts;
 }
 
 static int subnet_add(in_addr_t addr, int prefix_length, uint8_t flags) {
@@ -186,18 +205,11 @@ static int subnet_add(in_addr_t addr, int prefix_length, uint8_t flags) {
 	return result;
 }
 
-static int count_hosts(uint8_t flags) {
+static int count_hosts(uint8_t flags, uint8_t nflags) {
 	int n = 0;
 	struct host *target = hosts;
 	for (; target->ip; target++)
-		if ((target->flags & flags) == flags) n++;
-	return n;
-}
-
-static int active_targets(void) {
-	int n = 0;
-	struct host *target = hosts;
-	for (; target->ip; target++) if (target->flags & HOST_ACTIVE && target->flags & HOST_TARGET) n++;
+		if ((target->flags & flags) == flags && !(target->flags & nflags)) n++;
 	return n;
 }
 
@@ -215,6 +227,7 @@ cleanup(int sig)
 
 			if (!(target->flags & HOST_TARGET)) continue;
 			if (!(target->flags & HOST_ACTIVE)) continue;
+			if (target->flags & HOST_AVOID) continue;
 
 			struct host *model = hosts;
 			for(;model->ip;model++) {
@@ -269,9 +282,6 @@ static int cmd_hosts_add(char *arg, uint8_t flags) {
 	if (target_addr == -1) {
 		usage();
 	}
-	/* we need some more memory to store the target data */
-	int mem = (h_size) * sizeof(struct host);
-	hosts = realloc( hosts, mem );
 	return subnet_add(inet_addr(arg), scan_prefix_length, flags);
 }
 
@@ -294,9 +304,9 @@ main(int argc, char *argv[])
 	poison_cross = 0;
 	n_hosts = 0;
 
-	hosts = NULL;
+	hosts = calloc(1, sizeof(struct host));;
 
-	while ((c = getopt(argc, argv, "vrxm:i:c:h?V")) != -1) {
+	while ((c = getopt(argc, argv, "vrxm:i:c:a:h?V")) != -1) {
 		switch (c) {
 		case 'v':
 			verbose = 1;
@@ -312,6 +322,9 @@ main(int argc, char *argv[])
 			break;
 		case 'm':
 			cmd_hosts_add(optarg, HOST_MODEL);
+			break;
+		case 'a':
+			cmd_hosts_add(optarg, HOST_AVOID);
 			break;
 		case 'c':
 			cleanup_src = optarg;
@@ -396,11 +409,11 @@ main(int argc, char *argv[])
 		errx(1, "Unable to determine own mac address");
 	}
 
-	if (count_hosts( HOST_ACTIVE | HOST_TARGET ) == 0) {
+	if (count_hosts( HOST_ACTIVE | HOST_TARGET, HOST_AVOID ) == 0) {
 		errx(1, "No target hosts found.");
 	}
 
-	if (count_hosts( HOST_ACTIVE | HOST_MODEL ) == 0) {
+	if (count_hosts( HOST_ACTIVE | HOST_MODEL, 0 ) == 0) {
 		errx(1, "No model hosts found.");
 	}
 
@@ -414,6 +427,7 @@ main(int argc, char *argv[])
 		for(;target->ip; target++) {
 			if (!(target->flags & HOST_TARGET)) continue;
 			if (!(target->flags & HOST_ACTIVE)) continue;
+			if (target->flags & HOST_AVOID) continue;
 			struct host *model = hosts;
 			for (;model->ip; model++) {
 				if (!(model->flags & HOST_ACTIVE)) continue;

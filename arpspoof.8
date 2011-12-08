@@ -9,7 +9,7 @@ intercept packets on a switched LAN
 .na
 .nf
 .fi
-\fBarpspoof\fR [-v] [\fB-i \fIinterface\fR] [\fB-c \fIown|host|both\fR] [\fB-m \fImodel[/prefixlength]\fR] [\fB-x\fR] [\fB-r\fR] [\fItarget[/prefixlength]\fR]
+\fBarpspoof\fR [-v] [\fB-i \fIinterface\fR] [\fB-c \fIown|host|both\fR] [\fB-m \fImodel[/prefixlength]\fR] [\fB-m \fIavoid[/prefixlength]\fR] [\fB-x\fR] [\fB-r\fR] [\fItarget[/prefixlength]\fR]
 .SH DESCRIPTION
 .ad
 .fi
@@ -34,6 +34,9 @@ more reliably than using the own address, which is the default way arpspoof
 cleans up afterwards.
 .IP "\fB-m \fImodel[/prefixlength]\fR"
 Specify which host(s) to imitate.
+.IP "\fB-a \fIavoid[/prefixlength]\fR"
+Specify hosts who should not receive any packets from us. This is useful to avoid detection
+from intrusion detection systems. This switch will override both reverse and cross poisoning.
 .IP "\fB-r\fR"
 Poison both hosts (model and target) in classic mitm style to capture traffic in both directions.
 .IP "\fB-x\fR"
