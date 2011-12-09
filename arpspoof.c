@@ -264,20 +264,16 @@ cleanup(int sig)
 }
 
 static int cmd_hosts_add(char *arg, uint8_t flags) {
-	/* number of memory slots allocated for host list */
-	int h_size = n_hosts+1;
-	int scan_prefix_length = 32;
+	unsigned int scan_prefix_length = 32;
 	in_addr_t target_addr = 0;
 	char *scan_prefix = strchr(arg, '/');
 	/* do we have to scan an entire subnet? */
 	if (scan_prefix) {
 		*scan_prefix = '\0';
-		scan_prefix_length = atoi(scan_prefix+1);
-		if (scan_prefix_length < 0 || scan_prefix_length > 32) {
+		if (!sscanf(scan_prefix+1, "%u", &scan_prefix_length) || scan_prefix_length > 32) {
 			usage();
 		}
 	}
-	h_size += (1<<(32-scan_prefix_length));
 	target_addr = libnet_name2addr4(l, arg, LIBNET_RESOLVE);
 	if (target_addr == -1) {
 		usage();
