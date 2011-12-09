@@ -48,6 +48,8 @@ struct host {
 static int verbose = 0;
 static libnet_t *l;
 static int n_hosts = 0;
+/* number of host slots allocated */
+static uint64_t m_hosts = 0;
 static struct host *hosts;
 static char *intf;
 static int poison_reverse;
@@ -179,7 +181,10 @@ static int host_add(in_addr_t addr, uint8_t flags) {
 		return n_hosts;
 	}
 	/* host is not in the list, add it */
-	hosts = realloc( hosts, (n_hosts+2)*sizeof(struct host) );
+	if (m_hosts < (n_hosts+2)) {
+		hosts = realloc( hosts, (n_hosts+2)*sizeof(struct host) );
+		m_hosts = (n_hosts+2);
+	}
 	hosts[n_hosts].ip = addr;
 	hosts[n_hosts].flags = flags;
 	/* zero terminate the final entry */
@@ -190,13 +195,20 @@ static int host_add(in_addr_t addr, uint8_t flags) {
 
 static int subnet_add(in_addr_t addr, int prefix_length, uint8_t flags) {
 	int result = n_hosts;
-	uint32_t mask = ~((1<<(32-prefix_length))-1);
+	//uint32_t mask = ~( (~(uint32_t)0) >> prefix_length );
+	uint32_t mask = ~( UINT32_MAX >> prefix_length );
 	uint32_t net = (ntohl((uint32_t)addr)) & mask;
 	uint32_t brd = (ntohl((uint32_t)addr)) | ~mask;
 	uint32_t a;
 	if (prefix_length == 32) {
 		/* there is no network, only the single host! */
 		return host_add(addr, flags);
+	}
+	/* make sure we do not have to reallocate for every host */
+	uint64_t nethosts = ((uint64_t)1<<(32-prefix_length)+1);
+	if (m_hosts < nethosts) {
+		hosts = realloc( hosts, nethosts*sizeof(struct host) );
+		m_hosts = nethosts;
 	}
 	for (a = net+1; a<brd; a++) {
 		in_addr_t ia = (in_addr_t) htonl(a);
@@ -301,6 +313,7 @@ main(int argc, char *argv[])
 	n_hosts = 0;
 
 	hosts = calloc(1, sizeof(struct host));;
+	m_hosts = 1;
 
 	while ((c = getopt(argc, argv, "vrxm:i:c:a:h?V")) != -1) {
 		switch (c) {
