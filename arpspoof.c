@@ -146,9 +146,9 @@ arp_find(in_addr_t ip, struct ether_addr *mac)
 #else
 		arp_send(l, ARPOP_REQUEST, NULL, 0, NULL, ip, NULL);
 #endif
-		usleep(10000);
+		usleep((i+1)*ARP_PAUSE);
 	}
-	while (i++ < 3);
+	while (i++ < 5);
 
 	return (0);
 }
