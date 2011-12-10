@@ -153,18 +153,6 @@ arp_find(in_addr_t ip, struct ether_addr *mac)
 	return (0);
 }
 
-static int arp_find_all() {
-	struct host *target = hosts;
-	while(target->ip) {
-		if (arp_find(target->ip, &target->mac)) {
-			return 1;
-		}
-		target++;
-	}
-
-	return 0;
-}
-
 static struct host *find_host(in_addr_t ipaddr, uint8_t flags) {
 	struct host *h = hosts;
 	for (; h->ip; h++) {
@@ -301,11 +289,7 @@ main(int argc, char *argv[])
 	char pcap_ebuf[PCAP_ERRBUF_SIZE];
 	char libnet_ebuf[LIBNET_ERRBUF_SIZE];
 	int c;
-	int n_scan_hosts = 0;
-	char *scan_prefix = NULL;
-	int scan_prefix_length = 32;
 	char *cleanup_src = NULL;
-	in_addr_t target_addr;
 
 	intf = NULL;
 	poison_reverse = 0;
