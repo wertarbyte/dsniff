@@ -29,6 +29,8 @@
 
 /* time to wait between ARP packets */
 #define ARP_PAUSE 100000
+/* number of concurrent ARP requests */
+#define SIMULTANIOUS_ARP_REQUESTS 255
 
 extern char *ether_ntoa(struct ether_addr *);
 
@@ -140,6 +142,15 @@ arp_force(in_addr_t dst)
 }
 #endif
 
+static int trigger_arp_request(in_addr_t ip) {
+#ifdef __linux__
+		/* XXX - force the kernel to arp. feh. */
+		return arp_force(ip);
+#else
+		return arp_send(l, ARPOP_REQUEST, NULL, 0, NULL, ip, NULL);
+#endif
+}
+
 static int
 arp_find(in_addr_t ip, struct ether_addr *mac)
 {
@@ -148,15 +159,10 @@ arp_find(in_addr_t ip, struct ether_addr *mac)
 	do {
 		if (arp_cache_lookup(ip, mac, intf) == 0)
 			return (1);
-#ifdef __linux__
-		/* XXX - force the kernel to arp. feh. */
-		arp_force(ip);
-#else
-		arp_send(l, ARPOP_REQUEST, NULL, 0, NULL, ip, NULL);
-#endif
-		usleep((i+1)*(ARP_PAUSE/10));
+
+		trigger_arp_request(ip);
 	}
-	while (i++ < 3);
+	while (i++ < 1 && (usleep((i+1)*(ARP_PAUSE/10)||1)));
 
 	return (0);
 }
@@ -201,7 +207,15 @@ static int expand_range(struct range r) {
 	uint32_t net = (ntohl((uint32_t)r.ip)) & mask;
 	uint32_t brd = (ntohl((uint32_t)r.ip)) | ~mask;
 	uint32_t a;
-	for (a = (net==brd ? net : net+1); (a==net && a==brd) || a<brd; a++) {
+	uint32_t arp;
+	for (arp = a = (net==brd ? net : net+1); (a==net && a==brd) || a<brd; a++) {
+		if (a == arp) {
+			for (; ((arp==net && arp==brd) || arp < brd) && arp < a+SIMULTANIOUS_ARP_REQUESTS; arp++) {
+				trigger_arp_request( (in_addr_t) htonl(arp) );
+			}
+			usleep(10*ARP_PAUSE);
+		}
+
 		in_addr_t ia = (in_addr_t) htonl(a);
 		fprintf(stderr, "Looking up host %s...\n", libnet_addr2name4(ia, LIBNET_DONT_RESOLVE));
 		struct host host = {
