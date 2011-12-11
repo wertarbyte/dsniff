@@ -129,6 +129,8 @@ arp_force(in_addr_t dst)
 	if ((fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0)
 		return (0);
 
+	int ttl = 1;
+	setsockopt(fd, IPPROTO_IP, IP_TTL, &ttl, sizeof(ttl));
 	memset(&sin, 0, sizeof(sin));
 	sin.sin_family = AF_INET;
 	sin.sin_addr.s_addr = dst;
