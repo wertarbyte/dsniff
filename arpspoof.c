@@ -45,11 +45,19 @@ struct host {
 #define HOST_MODEL  (1<<3) /* we are trying to imitate this host and intercept traffic towards it*/
 #define HOST_AVOID  (1<<4) /* avoid sending packets to this host */
 
+struct range {
+	in_addr_t ip;
+	uint8_t prefixlength;
+	uint8_t flags;
+};
+
+static int n_ranges = 0;
+static struct range *ranges;
+
 static int verbose = 0;
 static libnet_t *l;
 static int n_hosts = 0;
 /* number of host slots allocated */
-static uint64_t m_hosts = 0;
 static struct host *hosts;
 static char *intf;
 static int poison_reverse;
@@ -161,56 +169,82 @@ static struct host *find_host(in_addr_t ipaddr, uint8_t flags) {
 	return NULL;
 }
 
-static int host_add(in_addr_t addr, uint8_t flags) {
+static int host_add(struct host h_new) {
 	struct host *h = NULL;
-	if (h = find_host(addr, 0)) {
+	if (h = find_host(h_new.ip, 0)) {
 		/* host is already present in our list, just add flags */
-		h->flags |= flags;
+		h->flags |= h_new.flags;
+		h->mac = h_new.mac;
 		return n_hosts;
 	}
 	/* host is not in the list, add it */
-	if (m_hosts < (n_hosts+2)) {
-		hosts = realloc( hosts, (n_hosts+2)*sizeof(struct host) );
-		m_hosts = (n_hosts+2);
-	}
-	hosts[n_hosts].ip = addr;
-	hosts[n_hosts].flags = flags;
+	hosts = realloc( hosts, (n_hosts+2)*sizeof(struct host) );
+	hosts[n_hosts] = h_new;
 	/* zero terminate the final entry */
 	n_hosts++;
 	memset(&hosts[n_hosts], 0, sizeof(struct host));
 	return n_hosts;
 }
 
-static int subnet_add(in_addr_t addr, int prefix_length, uint8_t flags) {
+static int count_hosts(uint8_t flags, uint8_t nflags) {
+	int n = 0;
+	struct host *target = hosts;
+	for (; target->ip; target++) {
+		if ((target->flags & flags) == flags && !(target->flags & nflags)) n++;
+	}
+	return n;
+}
+
+static int expand_range(struct range r) {
 	int result = n_hosts;
-	//uint32_t mask = ~( (~(uint32_t)0) >> prefix_length );
-	uint32_t mask = ~( UINT32_MAX >> prefix_length );
-	uint32_t net = (ntohl((uint32_t)addr)) & mask;
-	uint32_t brd = (ntohl((uint32_t)addr)) | ~mask;
+	uint32_t mask = (r.prefixlength >= sizeof(UINT32_MAX)*8 ? UINT32_MAX : ~(UINT32_MAX >> r.prefixlength));
+	uint32_t net = (ntohl((uint32_t)r.ip)) & mask;
+	uint32_t brd = (ntohl((uint32_t)r.ip)) | ~mask;
 	uint32_t a;
-	if (prefix_length == 32) {
-		/* there is no network, only the single host! */
-		return host_add(addr, flags);
-	}
-	/* make sure we do not have to reallocate for every host */
-	uint64_t nethosts = ((uint64_t)1<<(32-prefix_length)+1);
-	if (m_hosts < nethosts) {
-		hosts = realloc( hosts, nethosts*sizeof(struct host) );
-		m_hosts = nethosts;
-	}
-	for (a = net+1; a<brd; a++) {
+	for (a = (net==brd ? net : net+1); (a==net && a==brd) || a<brd; a++) {
 		in_addr_t ia = (in_addr_t) htonl(a);
-		result = host_add(ia, HOST_SUBNET|flags);
+		fprintf(stderr, "Looking up host %s...\n", libnet_addr2name4(ia, LIBNET_DONT_RESOLVE));
+		struct host host = {
+			.ip = ia,
+			.mac = {0},
+			.flags = r.flags,
+		};
+		if (r.prefixlength < 32) {
+			host.flags |= HOST_SUBNET;
+		}
+		int arp_status = arp_find(host.ip, &host.mac);
+		if (arp_status &&
+				/* just make sure we are not getting an empty or broadcast address */
+				(memcmp(&host.mac, zero_ha, sizeof(struct ether_addr)) != 0) &&
+				(memcmp(&host.mac, brd_ha, sizeof(struct ether_addr)) != 0)) {
+			host.flags |= HOST_ACTIVE;
+			if (host.flags & HOST_SUBNET) {
+				fprintf(stderr, "Found host in subnet %s: %s\n", libnet_addr2name4(host.ip, LIBNET_DONT_RESOLVE), ether_ntoa((struct ether_addr *)&host.mac));
+			}
+		} else {
+			host.flags &= (~HOST_ACTIVE);
+			if (! (host.flags & HOST_SUBNET)) {
+				fprintf(stderr, "Unable to find specified host %s\n", libnet_addr2name4(host.ip, LIBNET_DONT_RESOLVE));
+			}
+			if (poison_reverse && host.flags & HOST_MODEL) {
+				errx(1, "couldn't arp for spoof host %s",
+					libnet_addr2name4(host.ip, LIBNET_DONT_RESOLVE));
+				usage();
+			}
+		}
+
+		if (host.flags & (HOST_ACTIVE|HOST_AVOID)) {
+			result = host_add(host);
+		}
 	}
 	return result;
 }
 
-static int count_hosts(uint8_t flags, uint8_t nflags) {
-	int n = 0;
-	struct host *target = hosts;
-	for (; target->ip; target++)
-		if ((target->flags & flags) == flags && !(target->flags & nflags)) n++;
-	return n;
+static void expand_ranges(void) {
+	struct range *r = ranges;
+	for (; r->flags; r++) {
+		expand_range(*r);
+	}
 }
 
 static void
@@ -263,7 +297,13 @@ cleanup(int sig)
 	exit(0);
 }
 
-static int cmd_hosts_add(char *arg, uint8_t flags) {
+static int add_net_range(struct range r) {
+	ranges = realloc(ranges, (2+n_ranges) * sizeof(struct range));
+	ranges[n_ranges++] = r;
+	memset(&ranges[n_ranges], 0, sizeof(struct range));
+}
+
+static int cmd_add_net_range(char *arg, uint8_t flags) {
 	unsigned int scan_prefix_length = 32;
 	in_addr_t target_addr = 0;
 	char *scan_prefix = strchr(arg, '/');
@@ -278,7 +318,13 @@ static int cmd_hosts_add(char *arg, uint8_t flags) {
 	if (target_addr == -1) {
 		usage();
 	}
-	return subnet_add(inet_addr(arg), scan_prefix_length, flags);
+	struct range r = {
+		.ip = target_addr,
+		.prefixlength = scan_prefix_length,
+		.flags = flags
+	};
+	return add_net_range(r);
+
 }
 
 int
@@ -294,10 +340,12 @@ main(int argc, char *argv[])
 	intf = NULL;
 	poison_reverse = 0;
 	poison_cross = 0;
-	n_hosts = 0;
 
+	n_hosts = 0;
 	hosts = calloc(1, sizeof(struct host));;
-	m_hosts = 1;
+
+	n_ranges = 0;
+	ranges = calloc(1, sizeof(struct range));;
 
 	while ((c = getopt(argc, argv, "vrxm:i:c:a:h?V")) != -1) {
 		switch (c) {
@@ -314,10 +362,10 @@ main(int argc, char *argv[])
 			poison_cross = 1;
 			break;
 		case 'm':
-			cmd_hosts_add(optarg, HOST_MODEL);
+			cmd_add_net_range(optarg, HOST_MODEL);
 			break;
 		case 'a':
-			cmd_hosts_add(optarg, HOST_AVOID);
+			cmd_add_net_range(optarg, HOST_AVOID);
 			break;
 		case 'c':
 			cleanup_src = optarg;
@@ -353,16 +401,20 @@ main(int argc, char *argv[])
 	}
 
 	while (argc--) {
-		cmd_hosts_add(argv[0], HOST_TARGET);
+		cmd_add_net_range(argv[0], HOST_TARGET);
 		argv++;
 	}
 
 	if (poison_cross) {
-		struct host *host = hosts;
-		for(;host->ip; host++) {
-			host->flags |= (HOST_TARGET|HOST_MODEL);
+		struct range *r = ranges;
+		for(;r->flags; r++) {
+			if (r->flags & (HOST_TARGET|HOST_MODEL)) {
+				r->flags |= (HOST_TARGET|HOST_MODEL);
+			}
 		}
 	}
+
+	expand_ranges();
 
 	if (intf == NULL && (intf = pcap_lookupdev(pcap_ebuf)) == NULL)
 		errx(1, "%s", pcap_ebuf);
@@ -370,33 +422,6 @@ main(int argc, char *argv[])
 	if ((l = libnet_init(LIBNET_LINK, intf, libnet_ebuf)) == NULL)
 		errx(1, "%s", libnet_ebuf);
 
-	fprintf(stderr, "Scanning %d hw addresses...\n", n_hosts);
-	struct host *target = hosts;
-	for (; target->ip; target++) {
-		if (verbose) {
-			fprintf(stderr, "Looking up host %s...\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE));
-		}
-		int arp_status = arp_find(target->ip, &target->mac);
-		if (arp_status &&
-				/* just make sure we are not getting an empty or broadcast address */
-				(memcmp(&target->mac, zero_ha, sizeof(struct ether_addr)) != 0) &&
-				(memcmp(&target->mac, brd_ha, sizeof(struct ether_addr)) != 0)) {
-			target->flags |= HOST_ACTIVE;
-			if (target->flags & HOST_SUBNET) {
-				fprintf(stderr, "Found host in subnet %s: %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE), ether_ntoa((struct ether_addr *)&target->mac));
-			}
-		} else {
-			target->flags &= (~HOST_ACTIVE);
-			if (! (target->flags & HOST_SUBNET)) {
-				fprintf(stderr, "Unable to find specified host %s\n", libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE));
-			}
-			if (poison_reverse && target->flags & HOST_MODEL) {
-				errx(1, "couldn't arp for spoof host %s",
-					libnet_addr2name4(target->ip, LIBNET_DONT_RESOLVE));
-				usage();
-			}
-		}
-	}
 
 	if ((my_ha = (u_int8_t *)libnet_get_hwaddr(l)) == NULL) {
 		errx(1, "Unable to determine own mac address");
