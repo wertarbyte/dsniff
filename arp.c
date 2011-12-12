@@ -116,7 +116,8 @@ arp_cache_lookup(in_addr_t ip, struct ether_addr *ether, const char* lif)
 	close(sock);
 	memcpy(ether->ether_addr_octet, ar.arp_ha.sa_data, ETHER_ADDR_LEN);
 	
-	return (0);
+	/* was the request complete? */
+	return ((ar.arp_flags & ATF_COM) ? 0 : -1);
 }
 
 #endif /* !BSD */

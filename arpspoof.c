@@ -229,10 +229,7 @@ static int expand_range(struct range r) {
 			host.flags |= HOST_SUBNET;
 		}
 		int arp_status = arp_find(host.ip, &host.mac);
-		if (arp_status &&
-				/* just make sure we are not getting an empty or broadcast address */
-				(memcmp(&host.mac, zero_ha, sizeof(struct ether_addr)) != 0) &&
-				(memcmp(&host.mac, brd_ha, sizeof(struct ether_addr)) != 0)) {
+		if (arp_status) {
 			host.flags |= HOST_ACTIVE;
 			if (host.flags & HOST_SUBNET) {
 				fprintf(stderr, "Found host in subnet %s: %s\n", libnet_addr2name4(host.ip, LIBNET_DONT_RESOLVE), ether_ntoa((struct ether_addr *)&host.mac));
